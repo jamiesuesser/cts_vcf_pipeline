@@ -1,4 +1,4 @@
-# How snpArcher was changed to use the target BED, explained simply
+# How snpArcher was changed to use the target BED
 
 By default, snpArcher looks for variants across the whole ~32 billion-base
 axolotl genome. Our samples are exon capture, so we only sequenced about 31
