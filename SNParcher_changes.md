@@ -78,39 +78,73 @@ awk 'NR==FNR{o[$1]=NR; next} {print o[$1]"\t"$0}' results/reference/Axo.fa.gz.fa
 
 ## 3. snpArcher config (`templates/config.yaml`), changes from the template
 
-**Settings changed:**
-- `targets_bed` (new) | `reference/targets_sorted.bed` | Used by the edit in 1a |
-- `reference.name` / `source` | `Axo` / `reference/Axo_Ref.fna` | AmbMex60DD split500mil reference, same as the
- earlier pipeline |
-- `variant_calling.expected_coverage` | `high` | Exon capture |
-- `callable_sites.coverage.fraction` | `0.9` (was 1.0) | One weak sample shouldn't drop sites for everyone |
-- `callable_sites.mappability.enabled` | `false` (was true) | GenMap is impractically slow on a ~32 Gb genome |
-- `modules.qc` / `postprocess` | `false` | Optional; can be turned on in the settings file |
+Settings changed:
 
-For more details about these changes view the edit_me_before_running.yaml
+```yaml
+targets_bed: "reference/targets_sorted.bed"      # ADDED - used by the edit in 1a
 
-Each run, the pipeline fills in the sample list, reference (`reference_fasta`, `reference_name`, `targets_bed`)
-and thresholds from `edit_me_before_running.yaml`.
+reference:
+  name: "Axo"                                    # CHANGED - AmbMex60DD split500mil reference,
+  source: "reference/Axo_Ref.fna"                # CHANGED   same as the earlier lab pipeline
+
+variant_calling:
+  expected_coverage: "high"                      # CHANGED (was "low") - exon capture
+
+callable_sites:
+  coverage:
+    fraction: 0.9                                # CHANGED (was 1.0) - one weak sample shouldn't drop sites for everyone
+  mappability:
+    enabled: false                               # CHANGED (was true) - GenMap is impractically slow on a ~32 Gb genome
+
+modules:
+  qc:
+    enabled: false                               # optional - can be turned on in the settings file
+  postprocess:
+    enabled: false                               # optional - can be turned on in the settings file
+```
+
+For more details about these settings, see `edit_me_before_running.yaml`.
+
+Each run, the pipeline fills in the sample list, reference (`reference_fasta`, `reference_name`, `targets_bed`) and thresholds from `edit_me_before_running.yaml`.
 
 ---
 
 ## 4. Execution profile (`templates/profile.yaml`), changes from snpArcher's default profile
 
-**Settings changed:**
-- `executor` | `cluster-generic` with an `sbatch` submit command | snpArcher's SLURM plugin strips `SLURM_CONF`
- from jobs, so `srun` failed on ARC |
-- `default-resources` | `slurm_account: consgen`, `slurm_partition: normal_q`, `runtime: 720` | ARC allocation |
-- `keep-going` / `rerun-incomplete` | `true` | One failed sample doesn't stop the run; interrupted outputs are
- redone |
-- `retries` | `2` | Failed jobs retry with 2x then 3x memory (`attempt * ...`) |
-- `index_reference` | 150 GB, 72 h | ~32 Gb genome; indexing took ~17 h |
-- `bwa_mem` | `attempt * 80000` MB, 48 h | BWA index of this genome needs ~60+ GB |
-- `create_db_intervals` | `attempt * 32000` MB | Ran out of memory at 8 GB with 480 samples |
-- `conda-prefix` | `vcf_pipeline/conda_envs` | Tool environments shared across runs |
-- `rerun-triggers` | `mtime` | Lets each run reuse the saved reference index |
+Settings changed:
+
+```yaml
+executor: cluster-generic                        # ADDED - snpArcher's SLURM plugin strips SLURM_CONF
+cluster-generic-submit-cmd: "sbatch --parsable -A {resources.slurm_account} -p {resources.slurm_partition} -c {threads} --mem={resources.mem_mb} -t {resources.runtime} -o logs/slurm/{rule}_%j.out"
+                                                 # ADDED - plain sbatch, so srun is never used (srun failed on ARC)
+cluster-generic-cancel-cmd: "scancel"            # ADDED
+jobs: 100                                        # ADDED - max SLURM jobs at once
+latency-wait: 60                                 # ADDED - wait for files on the shared filesystem
+keep-going: true                                 # ADDED - one failed sample doesn't stop the run
+rerun-incomplete: true                           # ADDED - redo outputs from interrupted jobs
+retries: 2                                       # ADDED - failed jobs retry with 2x, then 3x memory
+conda-prefix: "vcf_pipeline/conda_envs"          # ADDED - tool environments shared across runs
+rerun-triggers: [mtime]                          # ADDED - lets runs reuse the saved reference index
+
+default-resources:
+  slurm_account: "consgen"                       # ADDED - ARC allocation
+  slurm_partition: "normal_q"                    # ADDED
+  runtime: 720                                   # ADDED - 12 h default per job
+
+set-resources:
+  index_reference:
+    mem_mb: 150000                               # ADDED - ~32 Gb genome; indexing took ~17 h
+    runtime: 4320                                # ADDED - 72 h
+  bwa_mem:
+    mem_mb: attempt * 80000                      # CHANGED (was attempt * 16000) - BWA index of this genome needs ~60+ GB
+  create_db_intervals:
+    mem_mb: attempt * 32000                      # CHANGED (was attempt * 8000) - ran out of memory with 480 samples
+    mem_mb_reduced: attempt * 28000              # CHANGED (was attempt * 7200)
+```
+
+Settings marked ADDED that relate to your account, jobs or retries (`slurm_account`, `slurm_partition`, `jobs`, `retries`) are filled in from `edit_me_before_running.yaml` each run.
 
 Environment change: installed `snakemake-executor-plugin-cluster-generic` in the snparcher conda env.
-
 ---
 
 ## 5. Added on top of snpArcher (not part of snpArcher)
