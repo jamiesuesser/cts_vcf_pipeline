@@ -60,7 +60,7 @@ Mapping (fastp, BWA, duplicate marking), GenomicsDBImport, GenotypeGVCFs, filter
 
  Source: `/projects/cts/backup/fromIRIS/fonmCTS/batch01/beds/Final_Design_baitCoverage300bpBuffer.bed`
  (bait design, 300 bp buffer)
- Used: `vcf_pipeline/reference/targets_sorted.bed` (39,908 targets, 31.0 Mb)
+ Used: `/projects/cts/jamie/reference/targets_sorted.bed` (39,908 targets, 31.0 Mb)
  Change: Sorted into the reference's contig order (`.fai` order), then by start
 
 **Now automatic:** each run checks that every BED contig exists in the reference and writes a reference-sorted
