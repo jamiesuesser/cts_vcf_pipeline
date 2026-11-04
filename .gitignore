@@ -1,0 +1,4 @@
+snpArcher/
+conda_envs/
+*.save*
+__pycache__/

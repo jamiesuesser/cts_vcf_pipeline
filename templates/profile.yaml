@@ -1,0 +1,120 @@
+use-conda: True
+executor: cluster-generic
+cluster-generic-submit-cmd: "sbatch --parsable -A {resources.slurm_account} -p {resources.slurm_partition} -c {threads} --mem={resources.mem_mb} -t {resources.runtime} -o logs/slurm/{rule}_%j.out"
+cluster-generic-cancel-cmd: "scancel"
+jobs: 100
+latency-wait: 60
+keep-going: true
+rerun-incomplete: true
+retries: 2
+
+# These resources will be applied to all rules. Can be overridden on a per-rule basis below.
+default-resources:
+  mem_mb: attempt * 8000
+  mem_mb_reduced: attempt * 7000
+  tmpdir: system_tmpdir
+  slurm_partition: "normal_q"
+  slurm_account: "consgen"
+  runtime: 720
+
+# Control number of threads each rule will use.
+set-threads:
+  # Fastq Processing
+  download_sra: 6
+  fastp: 6
+
+  # Alignment
+  bwa_mem: 16
+  markdup_library: 16
+
+  # GATK Variant Calling
+  gatk_haplotypecaller: 1
+  gatk_haplotypecaller_interval: 1
+  joint_genomics_db_import: 1
+  gatk_genomics_db_import: 1
+
+  # Callable Bed
+  mosdepth: 6
+  clam_collect: 6
+  clam_loci: 6
+
+  # Sentieon Tools
+  sentieon_map: 16
+  sentieon_dedup_library: 16
+  sentieon_haplotyper: 32
+  sentieon_combine_gvcf: 32
+
+  # Additional Variant Callers
+  bcftools_call: 8
+  deepvariant_call: 8
+  glnexus_joint: 4
+  parabricks_haplotypecaller: 16
+
+# Control/overwrite resources per rule.
+# mem_mb controls the scheduler request. mem_mb_reduced controls tool memory
+# budgets below the scheduler limit and should be an integer number of MB.
+set-resources:
+  index_reference:
+    mem_mb: 150000
+    runtime: 4320
+
+  # Fastq Processing
+  # Aligned (cSRA) runs take the sam-dump path, whose cost tracks record count:
+  # ~6 h for a typical accession and ~13 h for the largest measured (1.92e9
+  # records). Peak RSS is ~6.5 GB. samtools collate spills to tmpdir at roughly
+  # 81 bytes/record, so budget ~80 GB there for a typical run and ~160 GB for a
+  # large one, per concurrent job.
+  download_sra:
+    mem_mb: attempt * 12000
+    runtime: 1440
+
+  # Alignment
+  fastp:
+    mem_mb: attempt * 8000
+  bwa_mem:
+    mem_mb: attempt * 80000
+    runtime: 2880
+  markdup_library:
+    mem_mb: attempt * 8000
+
+  # Interval generation
+  picard_intervals:
+    mem_mb: attempt * 8000
+    mem_mb_reduced: attempt * 7200
+  create_gvcf_intervals:
+    mem_mb: attempt * 8000
+    mem_mb_reduced: attempt * 7200
+  create_db_intervals:
+    mem_mb: attempt * 32000
+    mem_mb_reduced: attempt * 28000
+
+  # GATK Variant Calling
+  gatk_haplotypecaller_interval:
+    mem_mb: attempt * 16000
+    mem_mb_reduced: attempt * 14400
+  gatk_genomics_db_import:
+    mem_mb: attempt * 32000
+    mem_mb_reduced: attempt * 24000
+  gatk_genotype_gvcfs:
+    mem_mb: attempt * 8000
+    mem_mb_reduced: attempt * 7200
+  joint_genomics_db_import:
+    mem_mb: attempt * 64000
+    mem_mb_reduced: attempt * 48000
+    runtime: 1440
+  joint_genotype_gvcfs:
+    mem_mb: attempt * 16000
+    mem_mb_reduced: attempt * 14400
+
+  # DeepVariant joint calling
+  glnexus_joint:
+    mem_mb: attempt * 32000
+    mem_mb_reduced: attempt * 28000
+
+  # Example: Set slurm parameters for a resource-intensive rule.
+  # sentieon_haplotyper:
+  #   mem_mb: attempt * 8000
+  #   mem_mb_reduced: attempt * 7200
+  #   slurm_partition: high-mem
+  #   runtime: 1440
+  #   cpus_per_task: 32

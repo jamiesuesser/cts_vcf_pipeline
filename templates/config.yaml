@@ -1,0 +1,123 @@
+# ---------------------------
+# snpArcher v2 Configuration
+# Batch 03 testing configuration 
+# ---------------------------
+
+# ---------------------------
+# This configuration is meant to just produce BAM files, not run any haplotype caller. The point
+# is to stop the run before variant calling so we can input out own bed file separate from the 
+# reference because we do not need to call the same thing
+# ---------------------------
+
+# Target BED
+targets_bed: "/projects/cts/jamie/Testing_Batch03/Ref/targets_sorted.bed"
+
+samples: "config/Batch03_Samples.csv"
+
+# ---------------------------
+# Not doing this now for testing but must be done for final!!!
+# ---------------------------
+
+# Optional: per-sample metadata for modules (exclude, outgroup, lat, long, etc.)
+# sample_metadata: "config/sample_metadata.csv"
+
+# ---------------------------
+# Reference 
+# ---------------------------
+
+reference:
+  name: "Axo"
+  source: "/projects/cts/jamie/Testing_Batch03/Ref/Axo_Ref.fna" 
+ # Can be a refseq/genbank accession, url, or path
+
+# ---------------------------
+# Variant Calling
+# ---------------------------
+variant_calling:
+  expected_coverage: "high"  # low | high | auto (future)
+# chose high because should be a 20x depth, is kind of a guess though
+
+
+  tool: "gatk" # gatk | sentieon | bcftools | deepvariant | parabricks
+  # Produce results/vcfs/filtered.vcf.gz (raw + GATK hard-filter FILTER column) as a
+  # default output. Only applies to GATK-family callers (gatk/sentieon/parabricks);
+  # it is ignored with a warning for bcftools/deepvariant (which don't emit the
+  # required annotations). Set false to skip hard filtering entirely; the raw VCF
+  # then becomes the final call set for postprocess/qc and `call_variants`.
+
+  generate_filtered_vcf: true
+  ploidy: 2
+  gatk:
+
+# Prior probability of heterozygosity, passed to HaplotypeCaller --heterozygosity and GenotypeGVCFs --heterozygosity
+    het_prior: 0.005 # check value
+
+# ---------------------------
+# Variant Calling - Not being used because gatk is being used
+# ---------------------------
+  sentieon:
+    license: ""
+
+  bcftools:
+    min_mapq: 20
+    min_baseq: 20
+    max_depth: 250
+
+  deepvariant:
+    model_type: "WGS"
+    num_shards: 8
+
+  parabricks:
+    container_image: ""  # Required if tool == "parabricks"
+    num_gpus: 1
+    num_cpu_threads: 16
+    extra_args: ""
+
+# ---------------------------
+# Intervals
+# ---------------------------
+intervals:
+  enabled: true
+  min_nmer: 500
+  num_gvcf_intervals: 50
+  db_scatter_factor: 0.15
+  min_contig_length: 0 # probs need to change
+  db_max_intervals_per_shard: 200
+  db_max_contigs_per_shard: 200
+
+# ---------------------------
+# Callable Sites
+# ---------------------------
+callable_sites:
+  generate_bed_file: True
+  coverage:
+    enabled: true
+    fraction: 0.9 # Changed from 1.0
+    min_coverage: auto
+    max_coverage: auto
+    merge_distance: 100
+  mappability:
+    enabled: false # Changed from true
+    min_score: 1
+    kmer: 150
+    merge_distance: 100
+
+# ---------------------------
+# Modules - not being run at the moment because not running mapping
+# ---------------------------
+modules:
+  qc:
+    enabled: false
+    clusters: 3
+    min_depth: 2
+    google_api_key: ""
+    exclude_scaffolds: ""
+  postprocess:
+    enabled: false
+    filtering:
+      contig_size: 10000
+      maf: 0.01
+      missingness: 0.75
+      exclude_scaffolds: "mtDNA,Y"
+      split_by_type: true       # also emit clean_snps.vcf.gz / clean_indels.vcf.gz
+      keep_basic_filter: false  # retain the pre-strict basic-filter VCF instead of discarding it
