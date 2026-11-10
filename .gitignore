@@ -2,3 +2,4 @@ snpArcher/
 conda_envs/
 *.save*
 __pycache__/
+.nfs*

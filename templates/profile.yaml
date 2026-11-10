@@ -1,7 +1,6 @@
 use-conda: True
-executor: cluster-generic
-cluster-generic-submit-cmd: "sbatch --parsable -A {resources.slurm_account} -p {resources.slurm_partition} -c {threads} --mem={resources.mem_mb} -t {resources.runtime} -o logs/slurm/{rule}_%j.out"
-cluster-generic-cancel-cmd: "scancel"
+executor: slurm
+slurm-efficiency-report: true
 jobs: 100
 latency-wait: 60
 keep-going: true

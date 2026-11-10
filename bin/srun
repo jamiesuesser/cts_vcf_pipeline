@@ -1,0 +1,4 @@
+#!/bin/bash
+# srun wrapper for VT ARC: Snakemake's SLURM plugin strips SLURM_CONF from jobs, so srun cannot find the cluster config.
+export SLURM_CONF="${SLURM_CONF:-/cm/shared/apps/slurm/etc/slurm/slurm.conf}"
+exec /cm/local/apps/slurm/current/bin/srun "$@"

@@ -45,6 +45,7 @@ command -v conda >/dev/null 2>&1 || { echo "ERROR: conda not found."; exit 1; }
 
 eval "$(conda shell.bash hook)"
 conda activate "$ENV"
+export PATH="$PIPE/bin:$PATH"   # srun wrapper (see bin/srun)
 
 set +e
 python "$PIPE/scripts/run_pipeline.py" "$@"
