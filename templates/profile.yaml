@@ -75,7 +75,13 @@ set-resources:
     mem_mb: attempt * 80000
     runtime: 2880
   markdup_library:
-    mem_mb: attempt * 8000
+    mem_mb: attempt * 8000 
+  mosdepth:
+    mem_mb: attempt * 32000
+  clam_collect:
+    mem_mb: attempt * 64000
+    runtime: 1440
+
 
   # Interval generation
   picard_intervals:
