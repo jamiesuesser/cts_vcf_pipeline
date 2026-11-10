@@ -1,7 +1,7 @@
 use-conda: True
 executor: slurm
 slurm-efficiency-report: true
-slurm-array-jobs: "gatk_haplotypecaller_interval"
+slurm-array-jobs: "gatk_haplotypecaller_interval,fastp,collect_fastp_stats,index_bam_csi,bam_stats,parse_bam_stats,concat_interval_gvcfs"
 slurm-array-limit: 1000
 jobs: 100
 latency-wait: 60
