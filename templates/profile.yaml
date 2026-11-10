@@ -1,6 +1,8 @@
 use-conda: True
 executor: slurm
 slurm-efficiency-report: true
+slurm-array-jobs: "gatk_haplotypecaller_interval"
+slurm-array-limit: 1000
 jobs: 100
 latency-wait: 60
 keep-going: true
