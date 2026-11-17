@@ -7,6 +7,11 @@ function checkrun --description 'Completion, VCF quality and resource use for a 
         return 1
     end
     set -l root $CTS_RUNS_DIR
+    # finished runs whose working folder was cleaned from scratch: use the kept copy
+    if test (count $argv) -ge 1; and not test -d $root/$argv[1]; and test -n "$CTS_KEEP_DIR"; and test -d $CTS_KEEP_DIR/$argv[1]
+        set root $CTS_KEEP_DIR
+        echo "(working folder gone from $CTS_RUNS_DIR - showing the kept copy in $CTS_KEEP_DIR)"
+    end
     set -l pipe $CTS_PIPELINE_DIR
     set -l envpy $CTS_ENV_DIR/bin/python
     if test (count $argv) -lt 1

@@ -6,6 +6,11 @@ function jobstatus --description 'Progress inside each running job of a run: job
         return 1
     end
     set -l root $CTS_RUNS_DIR
+    # finished runs whose working folder was cleaned from scratch: use the kept copy
+    if test (count $argv) -ge 1; and not test -d $root/$argv[1]; and test -n "$CTS_KEEP_DIR"; and test -d $CTS_KEEP_DIR/$argv[1]
+        set root $CTS_KEEP_DIR
+        echo "(working folder gone from $CTS_RUNS_DIR - showing the kept copy in $CTS_KEEP_DIR)"
+    end
     if test (count $argv) -lt 1
         echo "usage: jobstatus <run_name>"
         echo "runs: "(ls $root | string join ' ')

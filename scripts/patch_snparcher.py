@@ -13,6 +13,8 @@ Edits (see SNParcher_changes.md section 1):
       only runs over the targets.
   1d  QC dashboard: if no sample passes the dashboard's depth cutoff, keep all
       samples instead of handing PLINK an empty VCF (which stops the run)
+  1e  trimmed reads (results/filtered_fastqs) are temporary: deleted once the
+      sample is mapped (they are ~3 GB per deep sample and never used again)
 """
 import re
 import sys
@@ -111,5 +113,18 @@ if "CTS edit: never hand PLINK an empty sample list" not in q:
         die(f"{qc} is not in the expected form")
     qc.write_text(q.replace(OLD, NEW))
     changed.append("1d QC keeps all samples if none pass")
+
+# ---- 1e: trimmed reads are temporary ------------------------------------------
+fq = root / "workflow/rules/fastq.smk"
+f = fq.read_text()
+OLD1 = 'r1="results/filtered_fastqs/{sample}/{library}/{input_unit}_1.fastq.gz",'
+OLD2 = 'r2="results/filtered_fastqs/{sample}/{library}/{input_unit}_2.fastq.gz",'
+if 'temp("results/filtered_fastqs/' not in f:
+    if f.count(OLD1) != 1 or f.count(OLD2) != 1:
+        die(f"{fq} is not in the expected form")
+    f = f.replace(OLD1, 'r1=temp("results/filtered_fastqs/{sample}/{library}/{input_unit}_1.fastq.gz"),  # CTS edit')
+    f = f.replace(OLD2, 'r2=temp("results/filtered_fastqs/{sample}/{library}/{input_unit}_2.fastq.gz"),  # CTS edit')
+    fq.write_text(f)
+    changed.append("1e trimmed reads temporary")
 
 print("Applied: " + ", ".join(changed) if changed else "All CTS edits already present.")

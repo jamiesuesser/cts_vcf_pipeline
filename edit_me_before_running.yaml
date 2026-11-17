@@ -35,7 +35,11 @@
 run_name: "batch01_Nov16_testrun"
 
 # Where run folders are created
-output_root: "/projects/cts/jamie/runs"
+output_root: "/scratch/jamiesuesser/runs"
+
+# Where finished results are copied when a run ends (VCFs, GVCFs, QC, logs - not BAMs).
+# Leave empty ("") to keep everything in output_root only.
+keep_results_root: "/projects/cts/jamie/runs"
 
 # Note: Results go to <output_root>/<run_name>/
 

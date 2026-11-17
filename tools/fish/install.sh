@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs the fish helper commands (sqs, runstatus, jobstatus, checkrun) for this user.
+# Installs the fish helper commands (sqs, runstatus, jobstatus, checkrun, scratchls, scratchrm).
 #   bash <pipeline folder>/tools/fish/install.sh
 # Copies the functions to ~/.config/fish/functions/ and writes
 # ~/.config/fish/conf.d/cts_pipeline.fish with the folders read from edit_me_before_running.yaml.
@@ -11,11 +11,12 @@ get() { grep -E "^$1:" "$SETTINGS" | head -1 | sed -E 's/^[^:]+:[[:space:]]*//; 
 
 RUNS="$(get output_root)"
 ENV="$(get snparcher_conda_env)"
+KEEP="$(get keep_results_root)"
 [ -n "$RUNS" ] || { echo "ERROR: output_root is empty in $SETTINGS"; exit 1; }
 
 FUN="$HOME/.config/fish/functions"; CONF="$HOME/.config/fish/conf.d"
 mkdir -p "$FUN" "$CONF"
-for f in sqs runstatus jobstatus checkrun; do
+for f in sqs runstatus jobstatus checkrun scratchls scratchrm; do
     if [ -e "$FUN/$f.fish" ] && ! cmp -s "$FUN/$f.fish" "$PIPE/tools/fish/$f.fish"; then
         cp "$FUN/$f.fish" "$FUN/$f.fish.bak"
         echo "  (kept your old $f.fish as $f.fish.bak)"
@@ -27,10 +28,12 @@ cat > "$CONF/cts_pipeline.fish" <<CONFEOF
 set -gx CTS_PIPELINE_DIR "$PIPE"
 set -gx CTS_RUNS_DIR "$RUNS"
 set -gx CTS_ENV_DIR "$ENV"
+set -gx CTS_KEEP_DIR "$KEEP"
 CONFEOF
-echo "Installed sqs, runstatus, jobstatus, checkrun."
+echo "Installed sqs, runstatus, jobstatus, checkrun, scratchls, scratchrm."
 echo "  pipeline: $PIPE"
 echo "  runs:     $RUNS"
+echo "  kept:     ${KEEP:-(not set - results stay in runs folder)}"
 echo "  env:      $ENV"
 echo "Open a new fish shell (or run: source $CONF/cts_pipeline.fish) to use them."
-command -v fish >/dev/null || echo "NOTE: fish is not on your PATH - these commands need the fish shell."
+command -v fish >/dev/null || echo "(fish was not found from bash - fine if you use fish as your login shell.)"

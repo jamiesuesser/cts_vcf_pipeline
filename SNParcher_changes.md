@@ -188,3 +188,8 @@ Re-check after each big run with `scripts/resource_report.py <run folder>`.
 - `scripts/notify.py` | One email per finished step, flagging failed samples |
 - Sample summary | `results/qc_metrics/sample_summary.tsv`: snpArcher QC + on-target depth + metadata linked by
  HBS number |
+
+### 1e. Trimmed reads are temporary (`workflow/rules/fastq.smk`)
+The `fastp` outputs in `results/filtered_fastqs/` are marked `temp()`, so Snakemake deletes them once
+the sample is mapped. They are only read by `bwa_mem` and take ~3 GB per deep sample. Applied by
+`scripts/patch_snparcher.py`; add it to an existing `snpArcher/` with `scripts/update_snparcher.sh`.

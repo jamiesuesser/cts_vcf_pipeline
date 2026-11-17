@@ -170,6 +170,24 @@ automatically with more memory. One failed sample does not stop the others.
 
 ---
 
+## Where files go: working folder vs kept results
+
+Set in `edit_me_before_running.yaml`:
+
+- `output_root` - **working folder** for runs, e.g. `/scratch/<your PID>/runs`. Everything is made
+  here, including the big files: BAMs (~4.5 GB per deep sample), the GenomicsDB workspace and a copy of
+  the reference index. ARC's `/scratch` has no size limit, but **files untouched for 90 days are
+  deleted automatically**.
+- `keep_results_root` - **kept results**, e.g. `/projects/cts/<you>/runs`. When a run finishes, the
+  VCFs, GVCFs, QC tables/dashboard, logs and settings are copied here (BAMs are not). Leave it `""`
+  to keep everything in `output_root` instead.
+
+If the copy fails (for example the project is full), nothing is deleted; fix it and run
+`bash run_pipeline.sh --copy-results`. Use `scratchls` / `scratchrm` to see and clean the working folder.
+Trimmed reads (`results/filtered_fastqs`) are deleted automatically once each sample is mapped.
+
+---
+
 ## Helper commands for watching a run (fish shell)
 
 Four shortcuts for the [fish shell](https://fishshell.com). Install once per user:
@@ -188,6 +206,8 @@ the pipeline or change `output_root`. Open a new terminal afterwards.
 | `jobstatus <run_name>` | What each running cluster job is doing right now |
 | `sqs` | Your SLURM queue, labeled with pipeline step and sample(s) |
 | `checkrun <run_name>` | Full check after a run: finished?, VCF quality, sample QC, memory/time per step. Saves `run_check.txt` |
+| `scratchls` | Runs in your working folder (`output_root`, e.g. `/scratch`): size, BAM size, days since last used, and whether results were copied out |
+| `scratchrm <run>` | Deletes a run from the working folder after asking (`--bams-only` deletes just its BAMs). Refuses while the run is going and warns if its results were never copied |
 
 The pipeline itself runs in bash, so fish is only needed for these shortcuts.
 
@@ -199,6 +219,7 @@ The pipeline itself runs in bash, so fish is only needed for these shortcuts.
 - `--prepare-only` - Builds the run folder and settings, runs nothing
 - `--depth-only` - Re-runs only the depth check and summary table 
 - `--unlock` - Clears a leftover lock if a previous run was killed
+- `--copy-results` - Only copies a finished run's results to `keep_results_root`
 
 ---
 

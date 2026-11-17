@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -590,6 +591,51 @@ def email_depth(s, run_dir, info, missing):
     send_email(s, subject, "\n".join(body))
 
 
+# ------------------------------------------------------- copy results back
+# Big working files (BAMs, GenomicsDB workspace, reference copy) stay in output_root
+# (meant to be /scratch); everything you keep goes to keep_results_root (meant to be /projects).
+COPY_EXCLUDE = ["COPIED_TO.txt", "results/bams/", "results/filtered_fastqs/", "results/reference/",
+                "results/gatk_genomics_db/", "results/fastqs/", ".snakemake/"]
+
+
+def copy_results(s, run_dir):
+    keep_root = str(s.get("keep_results_root") or "").strip()
+    if not keep_root:
+        return True
+    dest = Path(keep_root) / run_dir.name
+    if dest.resolve() == run_dir.resolve():
+        return True
+    if not list((run_dir / "results" / "vcfs").glob("*.vcf.gz")):
+        say(f"no VCF yet - results NOT copied to {dest} (run with --copy-results once it finishes)")
+        return False
+    dest.mkdir(parents=True, exist_ok=True)
+    say(f"copying results (VCFs, GVCFs, QC, logs; not BAMs) to {dest}")
+    if shutil.which("rsync"):
+        cmd = ["rsync", "-a"] + [f"--exclude=/{e}" for e in COPY_EXCLUDE] + [f"{run_dir}/", f"{dest}/"]
+        rc = subprocess.call(cmd)
+    else:  # no rsync: plain Python copy with the same exclusions
+        skip = {(run_dir / e.rstrip("/")).resolve() for e in COPY_EXCLUDE}
+        try:
+            shutil.copytree(run_dir, dest, symlinks=True, dirs_exist_ok=True,
+                            ignore=lambda d, names: [n for n in names
+                                                     if (Path(d) / n).resolve() in skip])
+            rc = 0
+        except (OSError, shutil.Error) as e:
+            say(f"copy error: {e}")
+            rc = 1
+    if rc != 0:
+        say(f"WARNING: copying results failed (rsync code {rc}) - nothing in {run_dir} was deleted; "
+            "fix the problem (disk space?) and run: bash run_pipeline.sh --copy-results")
+        return False
+    stamp = time.strftime("%Y-%m-%d %H:%M")
+    (run_dir / "COPIED_TO.txt").write_text(f"{dest}\ncopied {stamp}\n")
+    (dest / "COPIED_FROM.txt").write_text(
+        f"{run_dir}\ncopied {stamp}\nBAMs and other large working files stayed there "
+        "(scratch is cleaned automatically; see README).\n")
+    say(f"results copied to {dest}")
+    return True
+
+
 # ------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description="CTS VCF pipeline")
@@ -599,6 +645,8 @@ def main():
     g.add_argument("--depth-only", action="store_true", help="only run the depth summary")
     g.add_argument("--unlock", action="store_true", help="clear a stale Snakemake lock")
     g.add_argument("--test-email", action="store_true", help="send a test email and stop")
+    g.add_argument("--copy-results", action="store_true",
+                   help="only copy finished results to keep_results_root")
     args = ap.parse_args()
 
     s = load_settings()
@@ -614,6 +662,8 @@ def main():
     if args.depth_only:
         email_depth(s, run_dir, *run_depth(s, run_dir))
         return 0
+    if args.copy_results:
+        return 0 if copy_results(s, run_dir) else 1
 
     shutil.copy(SETTINGS, run_dir / "edit_me_used_for_this_run.yaml")
     samples_csv = run_dir / "config" / "samples.csv"
@@ -652,6 +702,7 @@ def main():
     save_index(s, run_dir)
     monitor.finish(rc)
     email_depth(s, run_dir, *run_depth(s, run_dir))
+    copy_results(s, run_dir)
     vcfs = sorted((run_dir / "results" / "vcfs").glob("*.vcf.gz"))
     say("snpArcher " + ("finished OK" if rc == 0 else f"exited with errors (code {rc}) - check the log above"))
     for v in vcfs:
