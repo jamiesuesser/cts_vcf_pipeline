@@ -1,0 +1,6 @@
+#!/bin/bash
+# SLURM command wrapper for VT ARC. Inside the controller job, Snakemake's SLURM
+# plugin deletes every SLURM_* variable, including SLURM_CONF, and compute nodes
+# need SLURM_CONF to find the cluster config (same problem as bin/srun).
+export SLURM_CONF="${SLURM_CONF:-/cm/shared/apps/slurm/etc/slurm/slurm.conf}"
+exec "/cm/local/apps/slurm/current/bin/$(basename "$0")" "$@"

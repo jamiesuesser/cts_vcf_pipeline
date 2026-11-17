@@ -24,6 +24,9 @@ You fill in one settings file, run one command, and get:
 ---
 
 ## Before running you need the following:
+
+See [`REQUIREMENTS.md`](REQUIREMENTS.md) for software and tested versions.
+
 - Raw paired-end FASTQ files
 	- File names must end in `_R1_001.fastq.gz` and `_R2_001.fastq.gz`
  	- HBS number first, e.g. `103980_S12_L001_R1_001.fastq.gz` 
@@ -57,6 +60,36 @@ You fill in one settings file, run one command, and get:
 
 ---
 
+## Where the run itself runs
+
+`bash run_pipeline.sh` submits a small SLURM job (`ctl_<run_name>`: 2 cores,
+8 GB, up to 7 days) that runs Snakemake, which then submits all the other jobs.
+It does not run on the login node: ARC limits CPU use there, and Snakemake
+managing ~1000 jobs used ~7.5 CPUs (ARC asked us to move it, 2026-11-11).
+The log is still `<run folder>/pipeline_console.log`. Stop a run with
+`scancel` on the controller job, then `scancel -u $USER` for the jobs it started.
+
+## Test run on a subset (e.g. 50 samples)
+
+In `edit_me_before_running.yaml` set `run_name: "batch03_test50"` and
+`test_subset_size: 50`, then dry-run and run as usual. The run uses 50 samples
+spread evenly through the batch (listed in `config/test_subset_samples.txt`)
+and goes through every step, including joint genotyping, the VCF and the QC
+dashboard. Set `test_subset_size: 0` again for the full run.
+
+## Checking resource use (memory / time)
+
+After a run (or partway through), with the snparcher conda env active:
+```
+python /projects/cts/jamie/vcf_pipeline/scripts/resource_report.py /projects/cts/jamie/runs/<run_name>
+```
+It prints one row per step: peak memory vs. what was requested, run time, and
+CPU use, flags steps outside 50-70% memory use, and writes
+`resource_report.tsv` and `suggested_set_resources.yaml` in the run folder.
+Copy the suggestions you agree with into `templates/profile.yaml`.
+
+---
+
 ## What happens, step by step
 
 ### Getting ready (seconds to a few minutes) 
@@ -87,6 +120,10 @@ You fill in one settings file, run one command, and get:
 
 ### Processing the samples (hours to days; runs as many cluster jobs at once)
 
+Each sample's mapping steps run together as **one** 16-core cluster job,
+HaplotypeCaller for each sample is one small 1-core job, and each
+joint-genotyping chunk is one job (see `SNParcher_changes.md` section 4).
+
 7. **Cleaning the reads (fastp).** Removes leftover adapter sequence and
    low-quality bases from each read.
    *Email: Step 1/5 done.*
@@ -98,7 +135,8 @@ You fill in one settings file, run one command, and get:
 
 9. **Finding variants in each sample (GATK HaplotypeCaller).** Looks at each
    sample's reads in the target regions and records where it differs from the
-   reference. To run in parallel, the genome is split into ~50 chunks.
+   reference, over the target regions only (`hc_chunks_per_sample`, default 1
+   chunk per sample).
    *Email: Step 3/5 done.*
 
 10. **Combining all samples (GATK joint genotyping).** Merges every sample into
@@ -132,6 +170,29 @@ automatically with more memory. One failed sample does not stop the others.
 
 ---
 
+## Helper commands for watching a run (fish shell)
+
+Four shortcuts for the [fish shell](https://fishshell.com). Install once per user:
+
+```fish
+bash /path/to/vcf_pipeline/tools/fish/install.sh
+```
+
+This copies them to `~/.config/fish/functions/` and records your runs folder (from
+`edit_me_before_running.yaml`) in `~/.config/fish/conf.d/cts_pipeline.fish`. Re-run it if you move
+the pipeline or change `output_root`. Open a new terminal afterwards.
+
+| Command | What it shows |
+|---|---|
+| `runstatus <run_name>` | Progress of each pipeline step (done / total, errors) and the VCFs made so far |
+| `jobstatus <run_name>` | What each running cluster job is doing right now |
+| `sqs` | Your SLURM queue, labeled with pipeline step and sample(s) |
+| `checkrun <run_name>` | Full check after a run: finished?, VCF quality, sample QC, memory/time per step. Saves `run_check.txt` |
+
+The pipeline itself runs in bash, so fish is only needed for these shortcuts.
+
+---
+
 ## Other commands you can add to `run_pipeline.sh`
 -  `--dry-run` - Shows what would run, runs nothing
 - `--test-email` - Sends one test email
@@ -151,6 +212,13 @@ automatically with more memory. One failed sample does not stop the others.
 - `scripts/ontarget_depth_array.sh` - Cluster job that measures on-target depth 
 - `scripts/notify.py` - Sends the step emails 
 - `scripts/setup_snparcher.sh` - One-time setup: downloads snpArcher and applies our edits
+- `scripts/update_snparcher.sh` - Adds any newer edits to an existing `snpArcher/` folder
+- `scripts/resource_report.py` - Memory/time use per step, with suggested settings
+- `scripts/job_wrap.sh` - Runs every cluster job with Java's temp folder on the node's own scratch disk
+ (some ARC nodes have a full `/tmp`, which made GATK crash)
+- `tools/fish/` - The `sqs`, `runstatus`, `jobstatus` and `checkrun` commands, plus `install.sh`
+- `tools/print_versions.sh` - Prints the software versions in use (for `REQUIREMENTS.md`)
+- `REQUIREMENTS.md` - Software you need, and the versions this was tested with
 - `templates/` - Base snpArcher settings and cluster settings 
 - `reference/` - Reference genome, target regions, and `prepared/` (the saved index) 
 - `snpArcher/` - snpArcher itself (git branch `targeted-calling`) 

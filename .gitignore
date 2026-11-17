@@ -3,3 +3,6 @@ conda_envs/
 *.save*
 __pycache__/
 .nfs*
+*.patch
+*.bak
+diag_*.txt

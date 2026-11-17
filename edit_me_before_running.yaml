@@ -32,7 +32,7 @@
 # ---------------------------------------------------------------------
 
 # Set name for this run. 
-run_name: "batch03"
+run_name: "batch01_Nov16_testrun"
 
 # Where run folders are created
 output_root: "/projects/cts/jamie/runs"
@@ -44,12 +44,20 @@ output_root: "/projects/cts/jamie/runs"
 # Folder(s) holding the raw FASTQ files (*_R1_001.fastq.gz / *_R2_001.fastq.gz).
 # You can list several folders to genotype several batches together in ONE VCF if needed.
 raw_fastq_dirs:
-  - "/projects/cts/jamie/raw/batch03"
-#  - "/projects/cts/jamie/raw/batch04"
+  - "/projects/cts/jamie/raw/batch01_Nov16/S-26-1999"
+  - "/projects/cts/jamie/raw/batch01_Nov16/S-26-2000"
 
 # Samples to leave out (e.g. failed libraries), by sample ID
-exclude_samples: []
-#  - "103816"
+exclude_samples:
+  - "143084"
+  - "143085"
+
+# Test run on a subset: number of samples to use (0 = all samples).
+# Picks samples spread evenly through the sorted sample list (always the same
+# ones for the same input), and writes the chosen IDs to
+# <run folder>/config/test_subset_samples.txt.
+# Use a different run_name for a test run (e.g. "batch03_test50").
+test_subset_size: 12
 
 # -------- METADATA --------
 
@@ -113,7 +121,25 @@ het_prior: 0.001                # Imput can be 0 to 1; very rarely above 0.02. (
  
 ploidy: 2      # Number of chromosome copies per individual.
 
+# -------- HOW THE TARGETS ARE SPLIT UP (speed only; results are the same) --------
+hc_chunks_per_sample: 1         # Imput can be any positive whole number (default 1).
+        # HaplotypeCaller splits each sample's targets into this many chunks. 1 = one
+        # small 1-core job per sample, which was fastest overall in the test run
+        # (a whole sample took ~15 min). Only raise it for very high-depth samples.
+
+joint_genotyping_chunks: 50     # Imput can be any positive whole number (default 50).
+        # Joint genotyping (GenomicsDBImport + GenotypeGVCFs) splits the targets
+        # into this many chunks, each its own cluster job over all samples.
+        # Raise it (e.g. 100-200) for very large cohorts if chunks run too long.
+
 # -------- CALLABLE-SITE COVERAGE FILTER (applied after calling) --------
+callable_sites_mask: false      # Imput is true or false (false is default).
+        # true runs snpArcher's whole-genome callable-sites mask (per-base depth of
+        # every sample across the whole ~32 Gb genome, then combined across samples).
+        # For exon capture this is slow and memory-heavy and only the postprocess
+        # module uses it, so it is off. Must be true if postprocess_module is true.
+        # The settings below only matter when this is true.
+
 callable_fraction: 1.0          # Imput can be 0 to 1; rarely below 0.8 (snpArcher default is 1.0)
         # A position counts as callable only if at least [imput]% of samples have acceptable
         # depth there. 1.0 means that 100% of samples must have acceptable depth at that
@@ -176,6 +202,11 @@ depth_min_mapq: 20              # Imput can be positive whole number between 0-6
 # -------- OPTIONAL SNPARCHER MODULES --------
 qc_module: true                # Generate QC dashboard (includes PCA, relatedness, map)
 
+qc_min_sample_depth: 0         # Imput can be 0 or any positive number (0 is default).
+        # Samples whose mean depth at SNPs is at or below this are left OUT of the QC
+        # dashboard plots (PCA, relatedness, admixture). It does not affect the VCF.
+        # 0 = show every sample that has any data (snpArcher's own default is 2).
+
 
 # Generate clean VCF for popgen analyses:
 postprocess_module: false       # Generates extra cleaned-up VCF after the main run that contains only the variants
@@ -212,10 +243,16 @@ postprocess_exclude_scaffolds: ""  # Imput comma-seperated list of contig names 
 
 # Email for step notifications: one email per finished step, saying if
 # any sample failed in that step. Leave "" for no emails.
-notify_email: "jamiesuesser@vt.edu"
+notify_email: ""
 
 slurm_account: "consgen"
 slurm_partition: "normal_q"
+
+controller_on_login_node: false   # Imput is true or false (false is default).
+        # false: a full run starts a small SLURM job (2 cores, 8 GB, up to 7 days)
+        # that runs Snakemake and submits all the other jobs. ARC asked us not to run
+        # Snakemake on the login node (it used ~7.5 CPUs there).
+        # true: old behavior, Snakemake runs in a screen session on the login node.
 max_jobs: 100                 # max SLURM jobs at once
 retries: 2                    # failed jobs retry with more memory
 snparcher_conda_env: "/projects/cts/jamie/conda_env/snparcher"

@@ -7,10 +7,11 @@ What we changed or added relative to base snpArcher (harvardinformatics/snpArche
 
 ---
 
-## 1. snpArcher code changes (2 files)
+## 1. snpArcher code changes (4 files)
 
 The only edits to snpArcher's own code. They live on git branch **`targeted-calling`** in `vcf_pipeline/snpArcher/`, on top of upstream snpArcher commit **`8a73e5b`**. `scripts/setup_snparcher.sh` downloads that version
- and applies these edits automatically.
+ and applies these edits automatically (`scripts/patch_snparcher.py`). To add a newer edit to an existing
+ `snpArcher/` folder, run `bash scripts/update_snparcher.sh` (safe to run more than once).
 
 To see the exact diff:
 ```
@@ -50,9 +51,36 @@ Added a top-level property (next to `samples` and `sample_metadata`), because th
     description: Path to BED of target regions; HaplotypeCaller is restricted to these.
 ```
 
+### 1c. `workflow/rules/intervals.smk`, rule `filter_picard_intervals` (added 2026-11-10)
+
+snpArcher normally cuts the genome into chunks (`ScatterIntervalsByNs` over the whole ~32 Gb reference), then
+splits those into HaplotypeCaller chunks and GenomicsDB (joint genotyping) chunks. The rule now builds that
+interval list from the target BED instead:
+```
+picard BedToIntervalList INPUT={input.targets} SEQUENCE_DICTIONARY={input.ref_dict} \
+    OUTPUT=results/intervals/filtered.interval_list SORT=true UNIQUE=true
+```
+**Effect:**
+- Every HaplotypeCaller chunk contains targets, so no job can fail with "empty intersection" (before, a
+  genome chunk with no baits failed for every sample, and with it every sample's gVCF and the VCF).
+- Chunks are balanced by target bases, not genome bases, so they take similar time.
+- Joint genotyping only runs over the targets. Before, it ran over the whole genome in
+  0.15 x samples x 50 chunks (3,600 jobs for 480 samples, nearly all empty).
+- The whole-genome `ScatterIntervalsByNs` step no longer runs.
+
+Note: this only affects new run folders. An old run folder keeps its old `results/intervals/`.
+
+### 1d. `workflow/modules/qc/Snakefile`, QC sample filter (added 2026-11-11)
+
+The QC dashboard leaves out samples whose mean SNP depth is at or below `qc: min_depth`. If that
+left no samples, PLINK got an empty VCF and the run ended with an error (happened in
+batch03_test12, where every sample was below snpArcher's default of 2). Now, if no sample passes,
+all samples are kept and the log says so. The cutoff itself is now `qc_min_sample_depth` in
+`edit_me_before_running.yaml` (default 0).
+
 ### Not changed
 Mapping (fastp, BWA, duplicate marking), GenomicsDBImport, GenotypeGVCFs, filtering, callable sites and the
- QC/postprocess modules are all stock. Joint genotyping is faster because the gVCFs only contain target regions.
+ QC/postprocess modules are all stock.
 
 ---
 
@@ -109,47 +137,49 @@ Each run, the pipeline fills in the sample list, reference (`reference_fasta`, `
 
 ---
 
-## 4. Execution profile (`templates/profile.yaml`), changes from snpArcher's default profile
+## 4. Execution profile (`templates/profile.yaml`)
 
-Settings changed:
+Sized from the 12-sample test run `batch03_test12` (2026-11-10/11; numbers from
+`resource_report.py` and `seff`).
 
 ```yaml
-executor: cluster-generic                        # ADDED - snpArcher's SLURM plugin strips SLURM_CONF
-cluster-generic-submit-cmd: "sbatch --parsable -A {resources.slurm_account} -p {resources.slurm_partition} -c {threads} --mem={resources.mem_mb} -t {resources.runtime} -o logs/slurm/{rule}_%j.out"
-                                                 # ADDED - plain sbatch, so srun is never used (srun failed on ARC)
-cluster-generic-cancel-cmd: "scancel"            # ADDED
-jobs: 100                                        # ADDED - max SLURM jobs at once
-latency-wait: 60                                 # ADDED - wait for files on the shared filesystem
-keep-going: true                                 # ADDED - one failed sample doesn't stop the run
-rerun-incomplete: true                           # ADDED - redo outputs from interrupted jobs
-retries: 2                                       # ADDED - failed jobs retry with 2x, then 3x memory
-conda-prefix: "vcf_pipeline/conda_envs"          # ADDED - tool environments shared across runs
-rerun-triggers: [mtime]                          # ADDED - lets runs reuse the saved reference index
-
-default-resources:
-  slurm_account: "consgen"                       # ADDED - ARC allocation
-  slurm_partition: "normal_q"                    # ADDED
-  runtime: 720                                   # ADDED - 12 h default per job
-
-set-resources:
-  index_reference:
-    mem_mb: 150000                               # ADDED - ~32 Gb genome; indexing took ~17 h
-    runtime: 4320                                # ADDED - 72 h
-  bwa_mem:
-    mem_mb: attempt * 80000                      # CHANGED (was attempt * 16000) - BWA index of this genome needs ~60+ GB
-  create_db_intervals:
-    mem_mb: attempt * 32000                      # CHANGED (was attempt * 8000) - ran out of memory with 480 samples
-    mem_mb_reduced: attempt * 28000              # CHANGED (was attempt * 7200)
+executor: slurm                                  # native SLURM plugin; bin/srun wrapper restores SLURM_CONF
+slurm-efficiency-report: true
+jobs: 100 / latency-wait: 60 / keep-going / rerun-incomplete / retries: 2
+cores: 16                                        # max cores per SLURM job
+groups:                                          # several steps share one SLURM job
+  map: fastp ... bam_stats (1 sample per job)    # 16 cores, 78 GB
+  hc:  HaplotypeCaller + gVCF merge (1 sample)   # 1 core, 2 GB
+  jg:  GenomicsDBImport + GenotypeGVCFs (1 chunk)
+default-resources: mem_mb attempt*2000, runtime attempt*240
 ```
 
-Settings marked ADDED that relate to your account, jobs or retries (`slurm_account`, `slurm_partition`, `jobs`, `retries`) are filled in from `edit_me_before_running.yaml` each run.
+| Step | Test run measurement | Setting now |
+|---|---|---|
+| mapping job (bwa) | 54-57 GB of 78 GB (69-71%); 35-50 min, 4.8 h for a 93M-read sample | 80 GB; bwa runtime 6 h (x attempt) |
+| fastp / markdup | < 3.2 GB, < 7 min | 3 GB / 5 GB, 30 min |
+| HaplotypeCaller | 16 chunks/sample grouped 4 samples per 16-core job: chunks ran one at a time, **5% CPU, 1% memory** used | 1 chunk per sample, its own 1-core 2 GB job |
+| GenomicsDBImport | 3 GB peak, 2 min (12 samples) | 8 GB, grouped with genotyping |
+| GenotypeGVCFs | 0.8 GB, 1 min (12 samples) | 6 GB |
+| small steps | almost all < 1 GB, < 2 min | default 2 GB |
+| whole-genome callable sites (mosdepth --d4, clam) | mosdepth 27 GB; clam ~3.5 h on 6 cores using 1 GB | **off** (`callable_sites_mask: false`) |
 
-Environment change: installed `snakemake-executor-plugin-cluster-generic` in the snparcher conda env.
+Joint-genotyping memory and time grow with sample count, so those requests have room above the
+12-sample numbers; `attempt *` gives retries more.
+
+Why groups instead of SLURM job arrays: arrays still schedule one task per step per sample and
+the plugin holds a step until all its jobs are ready; arrays can't be combined with groups.
+
+Re-check after each big run with `scripts/resource_report.py <run folder>`.
+
 ---
 
 ## 5. Added on top of snpArcher (not part of snpArcher)
 - `edit_me_before_running.yaml` | All settings in one place: samples, reference files, thresholds, cluster, email |
 - `scripts/setup_snparcher.sh` | One-time: downloads snpArcher `8a73e5b` and applies the section 1 edits |
+- `scripts/patch_snparcher.py`, `scripts/update_snparcher.sh` | Apply the section 1 edits (new or existing checkout) |
+- `scripts/resource_report.py` | Per-step memory/time use vs. requests, with suggested `set-resources` |
+- `test_subset_size`, `hc_chunks_per_sample`, `joint_genotyping_chunks`, `callable_sites_mask`, `qc_min_sample_depth` | Settings for test runs, chunking, the callable-sites mask and the QC dashboard depth cutoff |
 - `run_pipeline.sh` | Launcher; starts a screen session, activates conda |
 - `scripts/run_pipeline.py` | Builds the sample sheet (v2 format, skips `Undetermined`), checks and sorts the
  target BED, reuses a saved reference index or saves a newly built one, writes config + profile, runs snpArcher |

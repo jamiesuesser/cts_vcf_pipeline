@@ -63,8 +63,9 @@ def send_email(s, subject, body):
 
 # ---------------------------------------------------------------- monitoring
 class RunMonitor:
-    RULE = re.compile(r"^(?:local)?rule (\S+):\s*$")
-    ERROR = re.compile(r"^Error in rule (\S+):\s*$")
+    # Steps inside a group job are printed indented, so allow leading spaces
+    RULE = re.compile(r"^\s*(?:local)?rule (\S+):\s*$")
+    ERROR = re.compile(r"^\s*Error in rule (\S+):\s*$")
     FIELD = re.compile(r"^\s+(jobid|wildcards|log): (.*)$")
     FINISHED = re.compile(r"^Finished jobid: (\d+) \(Rule: (\S+)\)")
     RESTART = re.compile(r"Trying to restart job (\d+)")

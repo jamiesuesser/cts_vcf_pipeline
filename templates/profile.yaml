@@ -1,22 +1,62 @@
 use-conda: True
-executor: slurm
-slurm-efficiency-report: true
-slurm-array-jobs: "gatk_haplotypecaller_interval,fastp,collect_fastp_stats,index_bam_csi,bam_stats,parse_bam_stats,concat_interval_gvcfs"
-slurm-array-limit: 1000
+# Jobs are submitted with plain sbatch (cluster-generic executor), which works from
+# inside the controller job. The native SLURM plugin silently failed to submit there
+# (2026-11-12). Status checks use scripts/slurm_status.sh (set by run_pipeline.py).
+executor: cluster-generic
+cluster-generic-submit-cmd: "sbatch --parsable -J cts -A {resources.slurm_account} -p {resources.slurm_partition} -c {threads} --mem={resources.mem_mb} -t {resources.runtime} -o logs/slurm/%j.out --exclude=tc225 __PIPE__/scripts/job_wrap.sh"
+cluster-generic-cancel-cmd: "scancel"
+max-status-checks-per-second: 1
 jobs: 100
 latency-wait: 60
 keep-going: true
 rerun-incomplete: true
 retries: 2
+scheduler: greedy   # the default ILP scheduler used several CPUs on the login node with ~1000 jobs
+
+# ---------------------------------------------------------------------------
+# Bigger SLURM jobs: group per-sample steps into one submission (CTS edit)
+# Sizes below are from the batch03_test12 run (2026-11-10), see
+# SNParcher_changes.md section 4.
+#
+# map: fastp -> bwa -> duplicate marking -> merge -> index -> BAM stats for one
+#      sample in ONE 16-core job (~45 min typical; bwa uses ~55 of 78 GB).
+# hc:  HaplotypeCaller + gVCF merge for one sample in ONE 1-core job.
+# jg:  GenomicsDBImport + GenotypeGVCFs for one target chunk in ONE job.
+#
+# "cores" caps every SLURM job. Group runtime = sum of the steps' runtimes,
+# so per-rule runtimes are kept close to measured use (x attempt for retries).
+# ---------------------------------------------------------------------------
+cores: 16
+groups:
+  fastp: map
+  collect_fastp_stats: map
+  bwa_mem: map
+  markdup_library: map
+  merge_library_bams: map
+  merge_dedup_libraries: map
+  merge_library_level_bams: map
+  index_bam_csi: map
+  bam_stats: map
+  parse_bam_stats: map
+  mosdepth: map
+  gatk_haplotypecaller_interval: hc
+  concat_interval_gvcfs_stage: hc
+  concat_interval_gvcfs: hc
+  gatk_genomics_db_import: jg
+  gatk_genotype_gvcfs: jg
+group-components:
+  map: 1          # samples per mapping job; bwa fills all 16 cores, so >1 runs samples back to back
+  hc: 1           # samples per HaplotypeCaller job
+  jg: 1           # target chunks per joint-genotyping job
 
 # These resources will be applied to all rules. Can be overridden on a per-rule basis below.
 default-resources:
-  mem_mb: attempt * 8000
-  mem_mb_reduced: attempt * 7000
+  mem_mb: attempt * 2000          # most small steps used < 1 GB in the test run
+  mem_mb_reduced: attempt * 1700
   tmpdir: system_tmpdir
   slurm_partition: "normal_q"
   slurm_account: "consgen"
-  runtime: 720
+  runtime: attempt * 240
 
 # Control number of threads each rule will use.
 set-threads:
@@ -69,42 +109,80 @@ set-resources:
     mem_mb: attempt * 12000
     runtime: 1440
 
-  # Alignment
+  # Mapping group. Test run (12 samples): bwa peak 54-57 GB, longest 252 min
+  # (93M reads); every other step < 7 min and < 3.2 GB.
   fastp:
-    mem_mb: attempt * 8000
+    mem_mb: attempt * 3000
+    runtime: attempt * 30
   bwa_mem:
     mem_mb: attempt * 80000
-    runtime: 2880
+    runtime: attempt * 360
   markdup_library:
-    mem_mb: attempt * 8000 
+    mem_mb: attempt * 5000
+    runtime: attempt * 30
+  merge_library_bams:
+    runtime: attempt * 20
+  merge_dedup_libraries:
+    runtime: attempt * 20
+  merge_library_level_bams:
+    runtime: attempt * 20
+  index_bam_csi:
+    runtime: attempt * 15
+  bam_stats:
+    runtime: attempt * 15
+  collect_fastp_stats:
+    mem_mb: 1000
+    runtime: 10
+  parse_bam_stats:
+    mem_mb: 1000
+    runtime: 10
+  # Whole-genome callable sites (off by default: callable_sites_mask: false)
   mosdepth:
-    mem_mb: attempt * 32000
+    mem_mb: attempt * 40000
+    runtime: attempt * 60
   clam_collect:
-    mem_mb: attempt * 64000
-    runtime: 1440
+    mem_mb: attempt * 4000
+    runtime: attempt * 240
 
-
-  # Interval generation
+  # Interval generation (all < 0.5 GB in the test run)
   picard_intervals:
     mem_mb: attempt * 8000
     mem_mb_reduced: attempt * 7200
   create_gvcf_intervals:
-    mem_mb: attempt * 8000
-    mem_mb_reduced: attempt * 7200
+    mem_mb: attempt * 2000
+    mem_mb_reduced: attempt * 1700
   create_db_intervals:
-    mem_mb: attempt * 32000
-    mem_mb_reduced: attempt * 28000
+    mem_mb: attempt * 4000
+    mem_mb_reduced: attempt * 3400
 
-  # GATK Variant Calling
-  gatk_haplotypecaller_interval:
-    mem_mb: attempt * 16000
-    mem_mb_reduced: attempt * 14400
+  # GATK variant calling. Test run: one HC chunk < 0.8 GB and ~1 min.
+  gatk_haplotypecaller_interval:   # one chunk per sample (hc_chunks_per_sample: 1)
+    mem_mb: attempt * 8000
+    mem_mb_reduced: attempt * 6800
+    runtime: attempt * 720
+  concat_interval_gvcfs_stage:
+    mem_mb: 1000
+    runtime: attempt * 20
+  concat_interval_gvcfs:
+    mem_mb: 1000
+    runtime: 10
+  # Joint genotyping grows with sample count: test run (12 samples) peaked at
+  # 3 GB / 2 min (import) and 0.8 GB / 1 min (genotype) per chunk.
   gatk_genomics_db_import:
-    mem_mb: attempt * 32000
-    mem_mb_reduced: attempt * 24000
+    mem_mb: attempt * 12000
+    mem_mb_reduced: attempt * 10000
+    runtime: attempt * 720
   gatk_genotype_gvcfs:
     mem_mb: attempt * 8000
-    mem_mb_reduced: attempt * 7200
+    mem_mb_reduced: attempt * 6800
+    runtime: attempt * 720
+  concat_interval_vcfs_stage:
+    mem_mb: attempt * 4000
+    runtime: attempt * 120
+  variant_filtration:
+    mem_mb: attempt * 4000
+    mem_mb_reduced: attempt * 3400
+    runtime: attempt * 240
   joint_genomics_db_import:
     mem_mb: attempt * 64000
     mem_mb_reduced: attempt * 48000

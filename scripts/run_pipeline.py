@@ -140,6 +140,13 @@ def build_sample_sheet(s, out_csv):
             rows.append((sample, f"{r1.resolve()};{r2.resolve()}"))
     if not rows:
         die("no *_R1_001.fastq.gz files found in raw_fastq_dirs")
+    n_sub = int(s.get("test_subset_size") or 0)
+    if n_sub > 0:
+        keep = pick_subset(sorted({r[0] for r in rows}), n_sub)
+        rows = [r for r in rows if r[0] in keep]
+        (out_csv.parent).mkdir(parents=True, exist_ok=True)
+        (out_csv.parent / "test_subset_samples.txt").write_text("\n".join(sorted(keep)) + "\n")
+        say(f"TEST SUBSET: using {len(keep)} samples -> {out_csv.parent / 'test_subset_samples.txt'}")
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(out_csv, "w") as f:
         f.write("sample_id,input_type,input\n")
@@ -152,13 +159,21 @@ def build_sample_sheet(s, out_csv):
     return sample_ids
 
 
+def pick_subset(ids, n):
+    """n sample IDs spread evenly through the sorted list (same input -> same picks)."""
+    if n >= len(ids):
+        return set(ids)
+    step = len(ids) / n
+    return {ids[int(i * step)] for i in range(n)}
+
+
 # ----------------------------------------------------------------- configs
 def put(d, key, val):
     if val is not None and val != "":
         d[key] = val
 
 
-def render_config(s, run_dir, samples_csv, metadata_csv):
+def render_config(s, run_dir, samples_csv, metadata_csv, n_samples):
     with open(PIPE / "templates" / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     cfg["samples"] = str(samples_csv)
@@ -178,11 +193,27 @@ def render_config(s, run_dir, samples_csv, metadata_csv):
     put(cov, "min_coverage", s.get("callable_min_coverage"))
     put(cov, "max_coverage", s.get("callable_max_coverage"))
     put(cs.setdefault("mappability", {}), "enabled", s.get("mappability_filter"))
+    mask = bool(s.get("callable_sites_mask", False))
+    cs["generate_bed_file"] = mask
+    cov["enabled"] = mask
+    if s.get("postprocess_module") and not mask:
+        die("postprocess_module: true needs callable_sites_mask: true (it filters on that mask)")
 
-    put(cfg.setdefault("intervals", {}), "min_contig_length", s.get("min_contig_length"))
+    iv = cfg.setdefault("intervals", {})
+    put(iv, "min_contig_length", s.get("min_contig_length"))
+    # Chunking. Intervals are cut from the target BED (snpArcher edit 1c).
+    # snpArcher makes db_scatter_factor * samples * num_gvcf_intervals joint-genotyping
+    # chunks; set the factor so that number equals joint_genotyping_chunks.
+    hc_chunks = int(s.get("hc_chunks_per_sample") or 1)
+    jg_chunks = int(s.get("joint_genotyping_chunks") or 50)
+    iv["num_gvcf_intervals"] = hc_chunks
+    iv["db_scatter_factor"] = (jg_chunks + 0.5) / (n_samples * hc_chunks)
+    iv["db_max_intervals_per_shard"] = 0   # no cap: a chunk holds many small targets
 
     mods = cfg.setdefault("modules", {})
-    put(mods.setdefault("qc", {}), "enabled", s.get("qc_module"))
+    qc = mods.setdefault("qc", {})
+    put(qc, "enabled", s.get("qc_module"))
+    qc["min_depth"] = float(s.get("qc_min_sample_depth") or 0)
     pp = mods.setdefault("postprocess", {})
     put(pp, "enabled", s.get("postprocess_module"))
     filt = pp.setdefault("filtering", {})
@@ -217,6 +248,12 @@ def render_profile(s, run_dir):
     prof["conda-prefix"] = str(CONDA_PREFIX)
     # Rerun on file timestamps only, so the shared pre-indexed reference is reused
     prof["rerun-triggers"] = ["mtime"]
+    prof["cluster-generic-status-cmd"] = str(PIPE / "scripts" / "slurm_status.sh")
+    # templates/profile.yaml writes the pipeline folder as __PIPE__ so the repo works wherever it is cloned
+    for k in ("cluster-generic-submit-cmd", "cluster-generic-cancel-cmd"):
+        if isinstance(prof.get(k), str):
+            prof[k] = prof[k].replace("__PIPE__", str(PIPE))
+    (run_dir / "logs" / "slurm").mkdir(parents=True, exist_ok=True)   # sbatch -o target
     out = run_dir / "profile" / "config.yaml"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
@@ -584,7 +621,7 @@ def main():
     _, meta = load_metadata(s)
     metadata_csv = write_snparcher_metadata(s, run_dir, sample_ids, meta)
     prepare_targets(s, run_dir)
-    render_config(s, run_dir, samples_csv, metadata_csv)
+    render_config(s, run_dir, samples_csv, metadata_csv, len(sample_ids))
     profile_dir = render_profile(s, run_dir)
     stage_reference(s, run_dir)
 
@@ -598,6 +635,17 @@ def main():
 
     if not os.environ.get("STY") and not os.environ.get("TMUX"):
         say("WARNING: not inside screen - closing this terminal will stop the run")
+
+    # Pre-pass: build snpArcher's interval lists (its "checkpoint" steps) on their own
+    # first. Then the main run knows every job from the start, which avoids a
+    # Snakemake bug with grouped jobs (crash "KeyError: <rule name>") that happens
+    # when the job plan grows in the middle of a run. Takes a few minutes; skipped
+    # automatically when the interval lists already exist.
+    say("pre-pass: building interval lists before the main run")
+    rc = run_snakemake(run_dir, profile_dir,
+                       ["--until", "create_gvcf_intervals", "create_db_intervals"])
+    if rc != 0:
+        say(f"WARNING: interval pre-pass exited with code {rc} - continuing with the main run")
 
     monitor = RunMonitor(s, run_dir, sample_ids)
     rc = run_snakemake(run_dir, profile_dir, [], monitor)
