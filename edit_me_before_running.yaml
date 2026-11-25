@@ -61,7 +61,7 @@ exclude_samples:
 # ones for the same input), and writes the chosen IDs to
 # <run folder>/config/test_subset_samples.txt.
 # Use a different run_name for a test run (e.g. "batch03_test50").
-test_subset_size: 12
+test_subset_size:
 
 # -------- METADATA --------
 
@@ -247,7 +247,7 @@ postprocess_exclude_scaffolds: ""  # Imput comma-seperated list of contig names 
 
 # Email for step notifications: one email per finished step, saying if
 # any sample failed in that step. Leave "" for no emails.
-notify_email: ""
+notify_email: "jamiesuesser@vt.edu"
 
 slurm_account: "consgen"
 slurm_partition: "normal_q"
