@@ -55,7 +55,7 @@ See [`REQUIREMENTS.md`](REQUIREMENTS.md) for software and tested versions.
 **To check on the run, run the followwing from any folder**:
    ```
    screen -r vcf_<run_name>                                   # watch live
-   tail -f /projects/cts/jamie/runs/<run_name>/pipeline_console.log   # or follow the log
+   tail -f /projects/cts/jamie/runs/<run_name>/logs/pipeline_console.log   # or follow the log
    ```
 
 ---
@@ -66,7 +66,7 @@ See [`REQUIREMENTS.md`](REQUIREMENTS.md) for software and tested versions.
 8 GB, up to 7 days) that runs Snakemake, which then submits all the other jobs.
 It does not run on the login node: ARC limits CPU use there, and Snakemake
 managing ~1000 jobs used ~7.5 CPUs (ARC asked us to move it, 2026-11-11).
-The log is still `<run folder>/pipeline_console.log`. Stop a run with
+The log is still `<run folder>/logs/pipeline_console.log`. Stop a run with
 `scancel` on the controller job, then `scancel -u $USER` for the jobs it started.
 
 ## Test run on a subset (e.g. 50 samples)
@@ -163,9 +163,20 @@ automatically with more memory. One failed sample does not stop the others.
 - `results/qc_metrics/sample_summary.tsv` - One row per sample: HBS number, read/mapping/duplicate stats,
  on-target depth, % of target bases at the minimum depth or above, pass/fail, and all metadata columns
 - `results/qc_metrics/low_depth_samples.txt` - Samples below the minimum depth
+- `results/qc/qc_summary/` - VCF quality tables from bcftools: `vcf_qc_summary.txt` (samples, sites,
+ SNPs, indels, % passing filters, Ts/Tv), `per_sample.tsv`, `sites.tsv.gz` (per-site QUAL/DP/QD/FS/MQ/SOR,
+ missingness, MAF, FILTER), `filter_counts.txt`, `stats.txt`
 - `results/bams/markdup/` - Mapped reads (BAM) per sample
-- `pipeline_console.log` - Everything printed during the run 
+- `logs/pipeline_console.log` - Everything printed during the run 
 - `edit_me_used_for_this_run.yaml` - A copy of the exact settings used 
+
+In the kept copy (`keep_results_root/<run_name>/`) things are grouped more simply:
+- `pipeline_config/` - `config/`, `profile/`, `benchmarks/`, `edit_me_used_for_this_run.yaml`, `COPIED_FROM.txt`
+- `logs/` - `pipeline_console.log` and every job's log
+- `results/vcfs/` - the VCFs
+- `results/qc/` - snpArcher's QC dashboard files, plus `qc_metrics/` (sample summary), `qc_summary/` (VCF QC)
+  and `ontarget_depth/` (per-sample mosdepth output)
+- `results/pipeline_outputs/` - intermediate outputs: `fastp/`, `gvcfs/`, `genomics_db/`, `intervals/`
 - `logs/` - Detailed logs for every job (look here when something fails) 
 
 ---
@@ -220,6 +231,7 @@ The pipeline itself runs in bash, so fish is only needed for these shortcuts.
 - `--depth-only` - Re-runs only the depth check and summary table 
 - `--unlock` - Clears a leftover lock if a previous run was killed
 - `--copy-results` - Only copies a finished run's results to `keep_results_root`
+- `--vcf-qc-only` - Only (re)runs the VCF quality tables on a finished run
 
 ---
 
@@ -231,6 +243,7 @@ The pipeline itself runs in bash, so fish is only needed for these shortcuts.
 - `scripts/run_pipeline.py` - Does the work: builds the sample list and settings, runs snpArcher,
  then the depth summary 
 - `scripts/ontarget_depth_array.sh` - Cluster job that measures on-target depth 
+- `scripts/vcf_qc.sh` - Cluster job that makes the VCF quality tables (bcftools)
 - `scripts/notify.py` - Sends the step emails 
 - `scripts/setup_snparcher.sh` - One-time setup: downloads snpArcher and applies our edits
 - `scripts/update_snparcher.sh` - Adds any newer edits to an existing `snpArcher/` folder

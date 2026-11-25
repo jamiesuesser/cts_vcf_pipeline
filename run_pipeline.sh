@@ -4,6 +4,7 @@
 #   bash vcf_pipeline/run_pipeline.sh --dry-run       show what would run, run nothing
 #   bash vcf_pipeline/run_pipeline.sh --prepare-only  build run folder/sample sheet/configs only
 #   bash vcf_pipeline/run_pipeline.sh --depth-only    only (re)run the depth + sample summary
+#   bash vcf_pipeline/run_pipeline.sh --vcf-qc-only   only (re)run the VCF quality tables
 #   bash vcf_pipeline/run_pipeline.sh --unlock        clear a stale Snakemake lock
 # Settings: vcf_pipeline/edit_me_before_running.yaml
 set -euo pipefail
@@ -32,8 +33,8 @@ if [ "$LONG" = 1 ] && [ -z "${STY:-}" ] && [ -z "${CTS_CONTROLLER:-}" ] \
         echo "A controller job named $JOB is already queued/running: squeue -u $USER -n $JOB"
         exit 1
     fi
-    mkdir -p "$ROOT/$RUN"
-    LOG="$ROOT/$RUN/pipeline_console.log"
+    mkdir -p "$ROOT/$RUN/logs"
+    LOG="$ROOT/$RUN/logs/pipeline_console.log"
     ARGS=""
     if [ $# -gt 0 ]; then ARGS=$(printf ' %q' "$@"); fi
     JID=$(sbatch --parsable -J "$JOB" -A "$(getval slurm_account)" -p "$(getval slurm_partition)" \
@@ -51,8 +52,8 @@ if [ "$LONG" = 1 ] && [ -z "${STY:-}" ] && [ -z "${CTS_CONTROLLER:-}" ]; then
         echo "A screen session named $SESSION already exists. Check it: screen -r $SESSION"
         exit 1
     fi
-    mkdir -p "$ROOT/$RUN"
-    LOG="$ROOT/$RUN/pipeline_console.log"
+    mkdir -p "$ROOT/$RUN/logs"
+    LOG="$ROOT/$RUN/logs/pipeline_console.log"
     screen -dmS "$SESSION" -L -Logfile "$LOG" bash "$PIPE/run_pipeline.sh" "$@"
     echo "Started in screen session: $SESSION (on $(hostname -s))"
     echo "  watch live:   screen -r $SESSION    (detach: screen -d $SESSION from another tab)"

@@ -17,7 +17,8 @@ function jobstatus --description 'Progress inside each running job of a run: job
         return 1
     end
     set -l run $root/$argv[1]
-    set -l log $run/pipeline_console.log
+    set -l log $run/logs/pipeline_console.log
+    test -f $log; or set log $run/pipeline_console.log   # older runs
     if not test -f $log
         echo "no log found: $log"
         return 1

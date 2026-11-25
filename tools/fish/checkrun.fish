@@ -21,7 +21,8 @@ function checkrun --description 'Completion, VCF quality and resource use for a 
     end
     set -l name $argv[1]
     set -l run $root/$name
-    set -l log $run/pipeline_console.log
+    set -l log $run/logs/pipeline_console.log
+    test -f $log; or set log $run/pipeline_console.log   # older runs
     if not test -d $run
         echo "no run folder: $run"
         return 1

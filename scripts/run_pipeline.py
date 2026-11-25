@@ -591,11 +591,102 @@ def email_depth(s, run_dir, info, missing):
     send_email(s, subject, "\n".join(body))
 
 
+# --------------------------------------------------------------- VCF QC
+def find_bcftools(s, run_dir):
+    if s.get("bcftools_bin") and Path(s["bcftools_bin"]).exists():
+        return str(s["bcftools_bin"])
+    for base in [CONDA_PREFIX, run_dir / ".snakemake" / "conda"]:
+        hits = sorted(base.glob("*/bin/bcftools"))
+        if hits:
+            return str(hits[0])
+    return shutil.which("bcftools")
+
+
+def run_vcf_qc(s, run_dir):
+    """bcftools stats + per-site table for the final VCF -> results/qc/qc_summary/."""
+    if s.get("vcf_qc") is False:
+        return None
+    vdir = run_dir / "results" / "vcfs"
+    vcf = next((p for p in [vdir / "filtered.vcf.gz", vdir / "raw.vcf.gz"] if p.exists()), None)
+    if vcf is None:
+        say("no VCF yet - skipping VCF QC")
+        return None
+    bcftools = find_bcftools(s, run_dir)
+    if not bcftools:
+        say("WARNING: bcftools not found - skipping VCF QC (set bcftools_bin in the settings)")
+        return None
+    outd = run_dir / "results" / "qc" / "qc_summary"
+    cmd = ["sbatch", "--wait", "--parsable", "-J", f"vcfqc_{run_dir.name}",
+           "-A", s["slurm_account"], "-p", s["slurm_partition"],
+           "-o", str(run_dir / "logs" / "slurm" / "vcf_qc_%j.out"),
+           str(PIPE / "scripts" / "vcf_qc.sh"), str(vcf), str(outd), bcftools]
+    say(f"VCF QC on {vcf.name} (waits until done)")
+    if subprocess.call(cmd) != 0:
+        say("WARNING: VCF QC job failed - see logs/slurm/vcf_qc_*.out")
+        return None
+
+    # short plain-text summary next to the tables
+    sn = {}
+    for line in open(outd / "summary_numbers.tsv"):
+        p = line.rstrip("\n").split("\t")
+        if len(p) >= 2:
+            sn[p[0].rstrip(":")] = p[1]
+    tstv = open(outd / "tstv.tsv").readline().split("\t")
+    counts = [line.split(None, 1) for line in open(outd / "filter_counts.txt") if line.strip()]
+    total = sum(int(c) for c, _ in counts)
+    npass = sum(int(c) for c, f in counts if f.strip() == "PASS")
+    lines = [f"VCF: {vcf}",
+             f"Samples: {sn.get('number of samples', 'NA')}",
+             f"Sites: {total}",
+             f"SNPs: {sn.get('number of SNPs', 'NA')}",
+             f"Indels: {sn.get('number of indels', 'NA')}",
+             f"Passing filters: {npass} ({100 * npass / total:.1f}%)" if total else "Passing filters: NA",
+             f"Ts/Tv: {tstv[2] if len(tstv) > 2 else 'NA'}",
+             "", "Sites per FILTER value:"] + [f"  {c:>10}  {f.strip()}" for c, f in counts]
+    (outd / "vcf_qc_summary.txt").write_text("\n".join(lines) + "\n")
+    for l in lines[1:7]:
+        say(f"VCF QC: {l}")
+    say(f"VCF QC tables: {outd}")
+    return outd
+
+
 # ------------------------------------------------------- copy results back
 # Big working files (BAMs, GenomicsDB workspace, reference copy) stay in output_root
 # (meant to be /scratch); everything you keep goes to keep_results_root (meant to be /projects).
-COPY_EXCLUDE = ["COPIED_TO.txt", "results/bams/", "results/filtered_fastqs/", "results/reference/",
-                "results/gatk_genomics_db/", "results/fastqs/", ".snakemake/"]
+# The kept copy (keep_results_root/<run_name>/) is laid out more simply than the working
+# folder, which keeps snpArcher's own layout (it needs it). Working path -> kept path:
+RELOCATE = [
+    ("benchmarks", "pipeline_config/benchmarks"),
+    ("config", "pipeline_config/config"),
+    ("profile", "pipeline_config/profile"),
+    ("edit_me_used_for_this_run.yaml", "pipeline_config/edit_me_used_for_this_run.yaml"),
+    ("pipeline_console.log", "logs/pipeline_console.log"),          # runs started before it moved to logs/
+    ("results/qc_metrics", "results/qc/qc_metrics"),
+    ("results/ontarget_depth", "results/qc/ontarget_depth"),
+    ("results/fastp", "results/pipeline_outputs/fastp"),
+    ("results/genomics_db", "results/pipeline_outputs/genomics_db"),
+    ("results/gvcfs", "results/pipeline_outputs/gvcfs"),
+    ("results/intervals", "results/pipeline_outputs/intervals"),
+]
+COPY_EXCLUDE = ["COPIED_TO.txt", "COPIED_FROM.txt", "results/bams/", "results/filtered_fastqs/",
+                "results/reference/", "results/gatk_genomics_db/", "results/fastqs/", ".snakemake/"]
+
+
+def _copy_item(src, dst):
+    """Copy one file or folder (merging into an existing folder). Returns 0 on success."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.which("rsync"):
+        return subprocess.call(["rsync", "-a", f"{src}/" if src.is_dir() else str(src),
+                                f"{dst}/" if src.is_dir() else str(dst)])
+    try:
+        if src.is_dir():
+            shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+        return 0
+    except (OSError, shutil.Error) as e:
+        say(f"copy error: {e}")
+        return 1
 
 
 def copy_results(s, run_dir):
@@ -609,12 +700,20 @@ def copy_results(s, run_dir):
         say(f"no VCF yet - results NOT copied to {dest} (run with --copy-results once it finishes)")
         return False
     dest.mkdir(parents=True, exist_ok=True)
+    # a kept copy made with an older layout: move its items to the new places first
+    for old, new in RELOCATE + [("COPIED_FROM.txt", "pipeline_config/COPIED_FROM.txt")]:
+        if (dest / old).exists() and not (dest / new).exists():
+            (dest / new).parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(dest / old), str(dest / new))
+
     say(f"copying results (VCFs, GVCFs, QC, logs; not BAMs) to {dest}")
+    excl = COPY_EXCLUDE + [w for w, _ in RELOCATE]
     if shutil.which("rsync"):
-        cmd = ["rsync", "-a"] + [f"--exclude=/{e}" for e in COPY_EXCLUDE] + [f"{run_dir}/", f"{dest}/"]
+        cmd = (["rsync", "-a"] + [f"--exclude=/{e.rstrip('/')}" for e in excl]
+               + [f"{run_dir}/", f"{dest}/"])
         rc = subprocess.call(cmd)
     else:  # no rsync: plain Python copy with the same exclusions
-        skip = {(run_dir / e.rstrip("/")).resolve() for e in COPY_EXCLUDE}
+        skip = {(run_dir / e.rstrip("/")).resolve() for e in excl}
         try:
             shutil.copytree(run_dir, dest, symlinks=True, dirs_exist_ok=True,
                             ignore=lambda d, names: [n for n in names
@@ -623,13 +722,17 @@ def copy_results(s, run_dir):
         except (OSError, shutil.Error) as e:
             say(f"copy error: {e}")
             rc = 1
+    for w, k in RELOCATE:
+        if rc == 0 and (run_dir / w).exists():
+            rc = _copy_item(run_dir / w, dest / k)
     if rc != 0:
-        say(f"WARNING: copying results failed (rsync code {rc}) - nothing in {run_dir} was deleted; "
+        say(f"WARNING: copying results failed (code {rc}) - nothing in {run_dir} was deleted; "
             "fix the problem (disk space?) and run: bash run_pipeline.sh --copy-results")
         return False
     stamp = time.strftime("%Y-%m-%d %H:%M")
     (run_dir / "COPIED_TO.txt").write_text(f"{dest}\ncopied {stamp}\n")
-    (dest / "COPIED_FROM.txt").write_text(
+    (dest / "pipeline_config").mkdir(exist_ok=True)
+    (dest / "pipeline_config" / "COPIED_FROM.txt").write_text(
         f"{run_dir}\ncopied {stamp}\nBAMs and other large working files stayed there "
         "(scratch is cleaned automatically; see README).\n")
     say(f"results copied to {dest}")
@@ -647,6 +750,8 @@ def main():
     g.add_argument("--test-email", action="store_true", help="send a test email and stop")
     g.add_argument("--copy-results", action="store_true",
                    help="only copy finished results to keep_results_root")
+    g.add_argument("--vcf-qc-only", action="store_true",
+                   help="only (re)run the VCF quality stats on the finished VCF")
     args = ap.parse_args()
 
     s = load_settings()
@@ -664,6 +769,11 @@ def main():
         return 0
     if args.copy_results:
         return 0 if copy_results(s, run_dir) else 1
+    if args.vcf_qc_only:
+        ok = run_vcf_qc(s, run_dir) is not None
+        if ok and (run_dir / "COPIED_TO.txt").exists():
+            copy_results(s, run_dir)   # refresh the /projects copy with the new QC files
+        return 0 if ok else 1
 
     shutil.copy(SETTINGS, run_dir / "edit_me_used_for_this_run.yaml")
     samples_csv = run_dir / "config" / "samples.csv"
@@ -702,6 +812,7 @@ def main():
     save_index(s, run_dir)
     monitor.finish(rc)
     email_depth(s, run_dir, *run_depth(s, run_dir))
+    run_vcf_qc(s, run_dir)
     copy_results(s, run_dir)
     vcfs = sorted((run_dir / "results" / "vcfs").glob("*.vcf.gz"))
     say("snpArcher " + ("finished OK" if rc == 0 else f"exited with errors (code {rc}) - check the log above"))

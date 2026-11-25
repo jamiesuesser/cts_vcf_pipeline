@@ -28,6 +28,7 @@ function scratchls --description 'List pipeline runs in the working (scratch) fo
         test -d $d/results/bams; and set bams (du -sh $d/results/bams 2>/dev/null | cut -f1)
         set -l t (stat -c %Y $d 2>/dev/null)
         test -f $d/pipeline_console.log; and set t (stat -c %Y $d/pipeline_console.log)
+        test -f $d/logs/pipeline_console.log; and set t (stat -c %Y $d/logs/pipeline_console.log)
         set -l days (math "floor(($now - $t) / 86400)")
         set -l state "results NOT copied - keep it"
         if contains -- ctl_$name $queue

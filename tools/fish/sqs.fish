@@ -3,7 +3,7 @@
 function sqs --description 'My SLURM jobs, labeled by step and sample'
     # Snakemake logs which samples went into each SLURM job; build jobid -> samples from all run logs
     set -l map (mktemp)
-    set -l logs $CTS_RUNS_DIR/*/pipeline_console.log   # empty if none yet (no error)
+    set -l logs $CTS_RUNS_DIR/*/logs/pipeline_console.log $CTS_RUNS_DIR/*/pipeline_console.log   # empty if none yet (no error)
     # Snakemake prints every job (its samples) first, then the SLURM submissions in the same order
     awk '
     FNR == 1 { n = 0; h = 0; on = 0 }

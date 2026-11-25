@@ -195,6 +195,6 @@ class RunMonitor:
         if other:
             body += ["", "Failed jobs in other steps:"]
             body += [f"  {r}  sample {s_}  log: {l}" for r, s_, l in other]
-        body += ["", "Full log: pipeline_console.log in the run folder.",
+        body += ["", "Full log: logs/pipeline_console.log in the run folder.",
                  "Step 5/5 (depth summary) runs next."]
         send_email(self.s, subject, "\n".join(body))

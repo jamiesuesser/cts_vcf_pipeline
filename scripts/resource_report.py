@@ -114,6 +114,8 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     run = Path(sys.argv[1]).resolve()
+    if not (run / "profile").exists() and (run / "pipeline_config" / "profile").exists():
+        run = run / "pipeline_config"   # kept copy in keep_results_root
     prof_file = run / "profile" / "config.yaml"
     if not prof_file.exists():
         sys.exit(f"no profile at {prof_file} - is this a run folder?")

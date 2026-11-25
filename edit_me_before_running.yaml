@@ -23,7 +23,7 @@
 #
 #  Checking on a run (log back in to tinkercliffs2 first):
 #      screen -r vcf_<run_name>
-#      tail -f /projects/cts/jamie/runs/<run_name>/pipeline_console.log
+#      tail -f /projects/cts/jamie/runs/<run_name>/logs/pipeline_console.log
 # =====================================================================
 
 
@@ -202,6 +202,14 @@ depth_min_mapq: 20              # Imput can be positive whole number between 0-6
         # Imput represents the chance the read is misplaced (0 means the read could
         # equally belong elsewhere; 10 means there is a 1 in 10 chance the read is
         # misplaced; 20 means there is 1 in 100 chance the read is misplaced).  
+
+vcf_qc: true                    # Imput is true or false (true is default).
+        # After the run, makes VCF quality tables in results/qc/qc_summary/
+        # (Ts/Tv, per-sample missingness/het/depth, per-site QUAL/QD/FS/MQ/SOR,
+        # missingness, MAF and filter status). Summary: vcf_qc_summary.txt
+
+bcftools_bin: "/projects/cts/jamie/conda_env/bcftools/bin/bcftools"
+        # bcftools used for vcf_qc. Leave "" to search snpArcher's conda envs.
 
 # -------- OPTIONAL SNPARCHER MODULES --------
 qc_module: true                # Generate QC dashboard (includes PCA, relatedness, map)
