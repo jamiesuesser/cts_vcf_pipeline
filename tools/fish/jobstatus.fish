@@ -12,9 +12,20 @@ function jobstatus --description 'Progress inside each running job of a run: job
         echo "(working folder gone from $CTS_RUNS_DIR - showing the kept copy in $CTS_KEEP_DIR)"
     end
     if test (count $argv) -lt 1
-        echo "usage: jobstatus <run_name>"
-        echo "runs: "(ls $root | string join ' ')
-        return 1
+        # runs going right now = queued/running controller jobs (named ctl_<run_name>)
+        set -l active (squeue -u $USER -h -o %j 2>/dev/null | string match -r '^ctl_.+' | string replace ctl_ '' | sort -u)
+        if test (count $active) -eq 1
+            set argv $active
+            echo "($active is the only run going - showing it)"
+        else
+            echo "usage: jobstatus <run_name>"
+            if test (count $active) -eq 0
+                echo "no runs going right now (finished runs can still be named)"
+            else
+                echo "runs going: "(string join ' ' $active)
+            end
+            return 1
+        end
     end
     set -l run $root/$argv[1]
     set -l log $run/logs/pipeline_console.log
